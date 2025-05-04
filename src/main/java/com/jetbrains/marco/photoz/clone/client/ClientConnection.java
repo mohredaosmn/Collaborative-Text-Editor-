@@ -1,92 +1,72 @@
 package com.jetbrains.marco.photoz.clone.client;
 
-import java.net.URI;
-import java.util.function.Consumer;
-
-import javax.websocket.ClientEndpoint;
-import javax.websocket.ContainerProvider;
-import javax.websocket.OnClose;
-import javax.websocket.OnMessage;
-import javax.websocket.OnOpen;
-import javax.websocket.Session;
-import javax.websocket.WebSocketContainer;
-
 import com.jetbrains.marco.photoz.clone.common.JSONUtils;
 import com.jetbrains.marco.photoz.clone.common.Message;
+
+import javax.websocket.*;
+import java.net.URI;
+import java.util.function.Consumer;
 
 @ClientEndpoint
 public class ClientConnection {
     private Session session;
-    private final String serverUri;
-    private final Consumer<Message> messageHandler;
+    private final String uri;
+    private final Consumer<Message> onMessage;
     private String sessionCode;
     private String uid;
 
-    /**
-     * @param serverUri WebSocket server URL (e.g., "ws://localhost:8080/editor")
-     * @param messageHandler Callback for incoming messages
-     */
-    public ClientConnection(String serverUri, Consumer<Message> messageHandler) {
-        this.serverUri = serverUri;
-        this.messageHandler = messageHandler;
+    public ClientConnection(String uri, Consumer<Message> onMessage) {
+        this.uri = uri;
+        this.onMessage = onMessage;
     }
 
     public void connect(String sessionCode, String uid) {
         this.sessionCode = sessionCode;
         this.uid = uid;
-        
         try {
             WebSocketContainer container = ContainerProvider.getWebSocketContainer();
-            container.connectToServer(this, new URI(serverUri));
+            container.connectToServer(this, new URI(uri));
         } catch (Exception e) {
-            throw new RuntimeException("Connection failed: " + e.getMessage(), e);
+            e.printStackTrace();
         }
+    }
+
+    /** Sends a cursor‐position update. */
+    public void sendCursorPosition(int line) {
+        Message m = Message.cursorUpdate(sessionCode, uid, line);
+        send(JSONUtils.toJson(m));
     }
 
     @OnOpen
     public void onOpen(Session session) {
         this.session = session;
-        sendMessage(Message.join(sessionCode, uid)); // Auto-send join message
+        // send join
+        Message join = Message.join(sessionCode, uid);
+        send(JSONUtils.toJson(join));
     }
 
     @OnMessage
-    public void onMessage(String jsonMessage) {
-        try {
-            Message message = JSONUtils.fromJson(jsonMessage, Message.class);
-            messageHandler.accept(message);
-        } catch (Exception e) {
-            System.err.println("Failed to parse message: " + e.getMessage());
-        }
+    public void onMsg(String text) {
+        Message msg = JSONUtils.fromJson(text, Message.class);
+        onMessage.accept(msg);
     }
 
     @OnClose
-    public void onClose(Session session) {
-        sendMessage(Message.leave(sessionCode, uid)); // Auto-send leave message
+    public void onClose(Session s) {
+        Message leave = Message.leave(sessionCode, uid);
+        send(JSONUtils.toJson(leave));
     }
 
-    // Primary send method
-    public void sendMessage(Message message) {
-        if (session != null && session.isOpen()) {
-            try {
-                session.getBasicRemote().sendText(JSONUtils.toJson(message));
-            } catch (Exception e) {
-                System.err.println("Send failed: " + e.getMessage());
-            }
-        }
+    public void sendMessage(Message m) {
+        send(JSONUtils.toJson(m));
     }
 
-    // Convenience method for cursor updates
-    public void sendCursorPosition(int lineNumber) {
-        sendMessage(Message.cursorUpdate(sessionCode, uid, lineNumber));
-    }
-
-    public void disconnect() {
+    private void send(String txt) {
         try {
-            if (session != null) {
-                session.close();
-            }
+            if (session != null && session.isOpen())
+                session.getBasicRemote().sendText(txt);
         } catch (Exception e) {
-            System.err.println("Disconnect error: " + e.getMessage());
+            e.printStackTrace();
         }
     }
 }

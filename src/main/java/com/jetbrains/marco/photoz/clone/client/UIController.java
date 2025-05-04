@@ -3,6 +3,7 @@ package com.jetbrains.marco.photoz.clone.client;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
+import java.security.SecureRandom;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -29,13 +30,27 @@ public class UIController {
     private boolean isRemoteUpdate = false;
     private final Map<String, HBox> userEntries = new HashMap<>();
 
+    // --- code‐generation support ---
+    private static final String CODE_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+    private static final SecureRandom RNG = new SecureRandom();
+    /** Builds a random 6‑char alphanumeric session code. */
+    private String generateSessionCode() {
+        StringBuilder sb = new StringBuilder(6);
+        for (int i = 0; i < 6; i++) {
+            sb.append(CODE_CHARS.charAt(RNG.nextInt(CODE_CHARS.length())));
+        }
+        return sb.toString();
+    }
+
+    /** Join an existing session. */
     @FXML
     public void onConnect() {
         String code = codeField.getText().trim();
-        String uid = uidField.getText().trim();
+        String uid  = uidField.getText().trim();
         conn = new ClientConnection("ws://localhost:8080/ws/edit", this::handleIncomingMessage);
         conn.connect(code, uid);
-        
+
+        // Broadcast caret‐line on move
         textArea.caretPositionProperty().addListener((obs, oldPos, newPos) -> {
             if (!isRemoteUpdate && conn != null) {
                 int line = calculateCurrentLine();
@@ -44,10 +59,26 @@ public class UIController {
         });
     }
 
+    /** Create a new blank document and start a fresh session. */
+    @FXML
+    public void onNew() {
+        // reset CRDT & UI
+        crdt = new CRDTTree();
+        userList.getItems().clear();
+        redraw(0);
+
+        // generate & show new code
+        String newCode = generateSessionCode();
+        codeField.setText(newCode);
+
+        // then join it
+        onConnect();
+    }
+
     private void handleIncomingMessage(Message msg) {
         Platform.runLater(() -> {
-            if (msg.uid.equals(uidField.getText())) return;
-            
+            if (msg.uid.equals(uidField.getText().trim())) return;
+
             switch (msg.type) {
                 case Message.JOIN:
                     addUserToList(msg.uid);
@@ -89,7 +120,6 @@ public class UIController {
             Label nameLabel = new Label(uid);
             Label lineLabel = new Label("(Line 1)");
             lineLabel.setStyle("-fx-text-fill: #666;");
-            
             HBox container = new HBox(5, nameLabel, lineLabel);
             userList.getItems().add(container);
             userEntries.put(uid, container);
@@ -161,14 +191,14 @@ public class UIController {
             if (Character.isISOControl(c) && c != '\n') return;
             e.consume();
             if (c == '\n') handleEnter();
-            else handleInsert(ch);
+            else          handleInsert(ch);
         });
 
         textArea.setOnKeyPressed(e -> {
             if (conn == null) return;
             if (e.isControlDown() && e.getCode() == KeyCode.Z) {
                 if (e.isShiftDown()) onRedo();
-                else onUndo();
+                else                  onUndo();
                 e.consume();
                 return;
             }
@@ -179,22 +209,21 @@ public class UIController {
     }
 
     private void handleEnter() {
-        int caret = textArea.getCaretPosition();
+        int caret    = textArea.getCaretPosition();
+        String uid   = uidField.getText().trim();
+        String code  = codeField.getText().trim();
+        String clock = String.valueOf(System.nanoTime());
         String parentId = crdt.getParentIdForInsertAtPosition(caret);
-        Message msg = Message.insert(
-            codeField.getText().trim(),
-            uidField.getText().trim(),
-            String.valueOf(System.nanoTime()),
-            "\n",
-            parentId
-        );
-        crdt.insert("\n", msg.uid, msg.clock, msg.parentId);
+
+        // insert newline
+        crdt.insert("\n", uid, clock, parentId);
+        Message msg = Message.insert(code, uid, clock, "\n", parentId);
         conn.sendMessage(msg);
         redraw(caret + 1);
     }
 
     private void handleInsert(String ch) {
-        int caret = textArea.getCaretPosition();
+        int caret    = textArea.getCaretPosition();
         String parentId = crdt.getParentIdForInsertAtPosition(caret);
         Message msg = Message.insert(
             codeField.getText().trim(),
@@ -210,34 +239,29 @@ public class UIController {
 
     private void handleBackspace(KeyEvent e) {
         int caret = textArea.getCaretPosition();
-        if (caret <= 0) {
-            e.consume();
-            return;
-        }
+        if (caret <= 0) { e.consume(); return; }
 
-        // First split at caret position
+        // split1
         crdt.splitAtPosition(caret);
-        Message split1 = Message.insert(
+        Message split1 = Message.split(
             codeField.getText().trim(),
             uidField.getText().trim(),
             String.valueOf(System.nanoTime()),
-            "",
-            String.valueOf(caret)
+            caret
         );
         conn.sendMessage(split1);
 
-        // Second split at previous position
+        // split2
         crdt.splitAtPosition(caret);
-        Message split2 = Message.insert(
+        Message split2 = Message.split(
             codeField.getText().trim(),
             uidField.getText().trim(),
             String.valueOf(System.nanoTime()),
-            "",
-            String.valueOf(caret - 1)
+            caret - 1
         );
         conn.sendMessage(split2);
 
-        // Delete the character
+        // delete
         String id = crdt.getCharIdAtPosition(caret);
         if (id != null) {
             crdt.delete(id);
@@ -259,7 +283,7 @@ public class UIController {
         Message msg = new Message();
         msg.type = type;
         msg.sessionCode = codeField.getText().trim();
-        msg.uid = uidField.getText().trim();
+        msg.uid         = uidField.getText().trim();
         conn.sendMessage(msg);
     }
 
