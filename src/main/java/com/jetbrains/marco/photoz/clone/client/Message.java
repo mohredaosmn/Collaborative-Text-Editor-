@@ -1,50 +1,55 @@
-package com.jetbrains.marco.photoz.clone.client;
+package com.jetbrains.marco.photoz.done.client;
 
 public class Message {
-    public String type;
-    public String uid;
-    public String sessionCode;
-    public String clock;
-    public String value;
-    public String parentId;
-    public String targetId;
-    public int position;
+    private String type;          // Message type (e.g., "edit", "cursor_position")
+    private String content;      // Message content
+    private String senderUid;    // User ID of the sender
+    private int cursorLine;      // Current line number of the user's cursor
+    private long timestamp;      // Timestamp for ordering operations
 
-    // Default constructor required for JSON deserialization
-    public Message() {}
-
-    // Constructor for control messages (undo/redo/join)
-    public Message(String type, String uid, String sessionCode) {
+    // Updated constructor to include cursorLine
+    public Message(String type, String content, String senderUid, int cursorLine) {
         this.type = type;
-        this.uid = uid;
-        this.sessionCode = sessionCode;
+        this.content = content;
+        this.senderUid = senderUid;
+        this.cursorLine = cursorLine;
+        this.timestamp = System.currentTimeMillis();
     }
 
-    // Constructor for insert operations
-    public Message(String type, String uid, String sessionCode, String clock, String value, String parentId) {
-        this.type = type;
-        this.uid = uid;
-        this.sessionCode = sessionCode;
-        this.clock = clock;
-        this.value = value;
-        this.parentId = parentId;
+    // Getters and setters
+    public String getType() {
+        return type;
     }
 
-    // Constructor for delete operations
-    public Message(String type, String uid, String sessionCode, String clock, String targetId) {
-        this.type = type;
-        this.uid = uid;
-        this.sessionCode = sessionCode;
-        this.clock = clock;
-        this.targetId = targetId;
+    public String getContent() {
+        return content;
     }
 
-    // Constructor for split operations
-    public Message(String type, String uid, String sessionCode, String clock, int position) {
-        this.type = type;
-        this.uid = uid;
-        this.sessionCode = sessionCode;
-        this.clock = clock;
-        this.position = position;
+    public String getSenderUid() {
+        return senderUid;
+    }
+
+    public int getCursorLine() {
+        return cursorLine;
+    }
+
+    public long getTimestamp() {
+        return timestamp;
+    }
+
+    public void setCursorLine(int cursorLine) {
+        this.cursorLine = cursorLine;
+    }
+
+    // Optional: Override toString() for debugging
+    @Override
+    public String toString() {
+        return "Message{" +
+                "type='" + type + '\'' +
+                ", content='" + content + '\'' +
+                ", senderUid='" + senderUid + '\'' +
+                ", cursorLine=" + cursorLine +
+                ", timestamp=" + timestamp +
+                '}';
     }
 }
