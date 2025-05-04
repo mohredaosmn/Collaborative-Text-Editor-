@@ -1,69 +1,92 @@
 package com.jetbrains.marco.photoz.clone.client;
 
-import com.jetbrains.marco.photoz.clone.common.JSONUtils;
-import com.jetbrains.marco.photoz.clone.common.Message;
-
-import javax.websocket.*;
 import java.net.URI;
 import java.util.function.Consumer;
+
+import javax.websocket.ClientEndpoint;
+import javax.websocket.ContainerProvider;
+import javax.websocket.OnClose;
+import javax.websocket.OnMessage;
+import javax.websocket.OnOpen;
+import javax.websocket.Session;
+import javax.websocket.WebSocketContainer;
+
+import com.jetbrains.marco.photoz.clone.common.JSONUtils;
+import com.jetbrains.marco.photoz.clone.common.Message;
 
 @ClientEndpoint
 public class ClientConnection {
     private Session session;
-    private final String uri;
-    private final Consumer<String> onMessage;
-
+    private final String serverUri;
+    private final Consumer<Message> messageHandler;
     private String sessionCode;
     private String uid;
 
-    public ClientConnection(String uri, Consumer<String> onMessage) {
-        this.uri = uri;
-        this.onMessage = onMessage;
+    /**
+     * @param serverUri WebSocket server URL (e.g., "ws://localhost:8080/editor")
+     * @param messageHandler Callback for incoming messages
+     */
+    public ClientConnection(String serverUri, Consumer<Message> messageHandler) {
+        this.serverUri = serverUri;
+        this.messageHandler = messageHandler;
     }
 
     public void connect(String sessionCode, String uid) {
         this.sessionCode = sessionCode;
         this.uid = uid;
-
+        
         try {
             WebSocketContainer container = ContainerProvider.getWebSocketContainer();
-            container.connectToServer(this, new URI(uri));
+            container.connectToServer(this, new URI(serverUri));
         } catch (Exception e) {
-            e.printStackTrace();
+            throw new RuntimeException("Connection failed: " + e.getMessage(), e);
         }
     }
 
     @OnOpen
     public void onOpen(Session session) {
         this.session = session;
-        System.out.println(">>> WebSocket connection opened");
-
-        // Send join message after connection established
-        Message joinMsg = new Message();
-        joinMsg.type = "join";
-        joinMsg.sessionCode = sessionCode;
-        joinMsg.uid = uid;
-
-        send(JSONUtils.toJson(joinMsg));
+        sendMessage(Message.join(sessionCode, uid)); // Auto-send join message
     }
 
     @OnMessage
-    public void onMsg(String msg) {
-        onMessage.accept(msg);
+    public void onMessage(String jsonMessage) {
+        try {
+            Message message = JSONUtils.fromJson(jsonMessage, Message.class);
+            messageHandler.accept(message);
+        } catch (Exception e) {
+            System.err.println("Failed to parse message: " + e.getMessage());
+        }
     }
 
     @OnClose
-    public void onClose(Session s) {
-        System.out.println(">>> WebSocket connection closed");
+    public void onClose(Session session) {
+        sendMessage(Message.leave(sessionCode, uid)); // Auto-send leave message
     }
 
-    public void send(String text) {
+    // Primary send method
+    public void sendMessage(Message message) {
+        if (session != null && session.isOpen()) {
+            try {
+                session.getBasicRemote().sendText(JSONUtils.toJson(message));
+            } catch (Exception e) {
+                System.err.println("Send failed: " + e.getMessage());
+            }
+        }
+    }
+
+    // Convenience method for cursor updates
+    public void sendCursorPosition(int lineNumber) {
+        sendMessage(Message.cursorUpdate(sessionCode, uid, lineNumber));
+    }
+
+    public void disconnect() {
         try {
-            if (session != null && session.isOpen()) {
-                session.getBasicRemote().sendText(text);
+            if (session != null) {
+                session.close();
             }
         } catch (Exception e) {
-            e.printStackTrace();
+            System.err.println("Disconnect error: " + e.getMessage());
         }
     }
 }
