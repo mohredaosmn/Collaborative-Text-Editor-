@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<?import javafx.scene.control.*?>
+<?import javafx.scene.layout.*?>
+<?import javafx.geometry.Insets?>
+
+<VBox xmlns="http://javafx.com/javafx"
+      xmlns:fx="http://javafx.com/fxml"
+      fx:controller="com.jetbrains.marco.photoz.clone.client.UIController"
+      spacing="5">
+      
+  <padding>
+    <Insets top="10" right="10" bottom="10" left="10"/>
+  </padding>
+
+  <HBox spacing="5">
+    <Button text="Connect" onAction="#onConnect"/>
+    <TextField fx:id="codeField" promptText="Session Code"/>
+    <Label text="UID:"/>
+    <TextField fx:id="uidField" promptText="User ID"/>
+  </HBox>
+
+  <HBox spacing="5">
+    <Button text="Import .txt" onAction="#onImport"/>
+    <Button text="Export .txt" onAction="#onExport"/>
+    <Button text="Undo" onAction="#onUndo"/>
+    <Button text="Redo" onAction="#onRedo"/>
+  </HBox>
+
+  <TextArea fx:id="textArea" prefRowCount="20" wrapText="false"/>
+  <Label text="Active Users:"/>
+  <ListView fx:id="userList"/>
+</VBox>
