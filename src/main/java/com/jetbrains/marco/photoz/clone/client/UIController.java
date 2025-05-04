@@ -24,16 +24,17 @@ public class UIController {
     @FXML public TextArea textArea;
     @FXML public TextField codeField, uidField;
     @FXML public ListView<HBox> userList;
-    
+    @FXML public TextField writeCodeField, readCodeField;
+
     private ClientConnection conn;
     private CRDTTree crdt = new CRDTTree();
     private boolean isRemoteUpdate = false;
+    private boolean isReadOnly = false;
     private final Map<String, HBox> userEntries = new HashMap<>();
 
-    // --- code‐generation support ---
     private static final String CODE_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
     private static final SecureRandom RNG = new SecureRandom();
-    /** Builds a random 6‑char alphanumeric session code. */
+
     private String generateSessionCode() {
         StringBuilder sb = new StringBuilder(6);
         for (int i = 0; i < 6; i++) {
@@ -42,37 +43,43 @@ public class UIController {
         return sb.toString();
     }
 
-    /** Join an existing session. */
-    @FXML
-    public void onConnect() {
-        String code = codeField.getText().trim();
-        String uid  = uidField.getText().trim();
-        conn = new ClientConnection("ws://localhost:8080/ws/edit", this::handleIncomingMessage);
-        conn.connect(code, uid);
-
-        // Broadcast caret‐line on move
-        textArea.caretPositionProperty().addListener((obs, oldPos, newPos) -> {
-            if (!isRemoteUpdate && conn != null) {
-                int line = calculateCurrentLine();
-                conn.sendCursorPosition(line);
-            }
-        });
-    }
-
-    /** Create a new blank document and start a fresh session. */
     @FXML
     public void onNew() {
-        // reset CRDT & UI
         crdt = new CRDTTree();
         userList.getItems().clear();
         redraw(0);
 
-        // generate & show new code
-        String newCode = generateSessionCode();
-        codeField.setText(newCode);
+        String baseCode = generateSessionCode();
+        String writeCode = baseCode + "-RW";
+        String readCode = baseCode + "-RO";
 
-        // then join it
+        codeField.setText(writeCode);
+        writeCodeField.setText(writeCode);
+        readCodeField.setText(readCode);
+
+        isReadOnly = false;
         onConnect();
+    }
+
+    @FXML
+    public void onConnect() {
+        String code = codeField.getText().trim();
+        String uid  = uidField.getText().trim();
+
+        isReadOnly = code.endsWith("-RO");
+
+        conn = new ClientConnection("ws://localhost:8080/ws/edit", this::handleIncomingMessage);
+        conn.connect(code, uid);
+
+        addUserToList(uid);
+
+        textArea.caretPositionProperty().addListener((obs, oldPos, newPos) -> {
+            if (!isRemoteUpdate && conn != null) {
+                int line = calculateCurrentLine();
+                updateUserLine(uid, line);
+                conn.sendCursorPosition(line);
+            }
+        });
     }
 
     private void handleIncomingMessage(Message msg) {
@@ -80,37 +87,23 @@ public class UIController {
             if (msg.uid.equals(uidField.getText().trim())) return;
 
             switch (msg.type) {
-                case Message.JOIN:
-                    addUserToList(msg.uid);
-                    break;
-                case Message.LEAVE:
-                    removeUserFromList(msg.uid);
-                    break;
-                case Message.CURSOR_POSITION:
-                    updateUserLine(msg.uid, msg.cursorLine);
-                    break;
+                case Message.JOIN: addUserToList(msg.uid); break;
+                case Message.LEAVE: removeUserFromList(msg.uid); break;
+                case Message.CURSOR_POSITION: updateUserLine(msg.uid, msg.cursorLine); break;
                 case Message.INSERT:
-                    if (msg.content != null && msg.parentId != null) {
+                    if (msg.content != null && msg.parentId != null)
                         crdt.insert(msg.content, msg.uid, msg.clock, msg.parentId);
-                    }
                     break;
                 case Message.DELETE:
-                    if (msg.targetId != null) {
-                        crdt.delete(msg.targetId);
-                    }
+                    if (msg.targetId != null) crdt.delete(msg.targetId);
                     break;
-                case Message.UNDO:
-                    crdt.undo();
-                    break;
-                case Message.REDO:
-                    crdt.redo();
-                    break;
+                case Message.UNDO: crdt.undo(); break;
+                case Message.REDO: crdt.redo(); break;
                 case Message.SPLIT:
-                    if (msg.position >= 0) {
-                        crdt.splitAtPosition(msg.position);
-                    }
+                    if (msg.position >= 0) crdt.splitAtPosition(msg.position);
                     break;
             }
+
             redraw(textArea.getCaretPosition());
         });
     }
@@ -118,9 +111,13 @@ public class UIController {
     private void addUserToList(String uid) {
         if (!userEntries.containsKey(uid)) {
             Label nameLabel = new Label(uid);
+            if (uid.equals(uidField.getText().trim())) {
+                nameLabel.setStyle("-fx-font-weight: bold; -fx-text-fill: #2a82da;");
+            }
             Label lineLabel = new Label("(Line 1)");
             lineLabel.setStyle("-fx-text-fill: #666;");
             HBox container = new HBox(5, nameLabel, lineLabel);
+
             userList.getItems().add(container);
             userEntries.put(uid, container);
         }
@@ -169,6 +166,7 @@ public class UIController {
 
     @FXML
     public void onUndo() {
+        if (isReadOnly) return;
         crdt.undo();
         broadcastControl(Message.UNDO);
         redraw(textArea.getCaretPosition());
@@ -176,6 +174,7 @@ public class UIController {
 
     @FXML
     public void onRedo() {
+        if (isReadOnly) return;
         crdt.redo();
         broadcastControl(Message.REDO);
         redraw(textArea.getCaretPosition());
@@ -184,25 +183,23 @@ public class UIController {
     @FXML
     public void initialize() {
         textArea.addEventFilter(KeyEvent.KEY_TYPED, e -> {
-            if (isRemoteUpdate || conn == null) return;
+            if (isRemoteUpdate || conn == null || isReadOnly) return;
             String ch = e.getCharacter();
             if (ch == null || ch.isEmpty()) return;
             char c = ch.charAt(0);
             if (Character.isISOControl(c) && c != '\n') return;
             e.consume();
             if (c == '\n') handleEnter();
-            else          handleInsert(ch);
+            else           handleInsert(ch);
         });
 
         textArea.setOnKeyPressed(e -> {
-            if (conn == null) return;
+            if (conn == null || isReadOnly) return;
             if (e.isControlDown() && e.getCode() == KeyCode.Z) {
                 if (e.isShiftDown()) onRedo();
-                else                  onUndo();
+                else                 onUndo();
                 e.consume();
-                return;
-            }
-            if (e.getCode() == KeyCode.BACK_SPACE) {
+            } else if (e.getCode() == KeyCode.BACK_SPACE) {
                 handleBackspace(e);
             }
         });
@@ -215,7 +212,6 @@ public class UIController {
         String clock = String.valueOf(System.nanoTime());
         String parentId = crdt.getParentIdForInsertAtPosition(caret);
 
-        // insert newline
         crdt.insert("\n", uid, clock, parentId);
         Message msg = Message.insert(code, uid, clock, "\n", parentId);
         conn.sendMessage(msg);
@@ -241,36 +237,18 @@ public class UIController {
         int caret = textArea.getCaretPosition();
         if (caret <= 0) { e.consume(); return; }
 
-        // split1
         crdt.splitAtPosition(caret);
-        Message split1 = Message.split(
-            codeField.getText().trim(),
-            uidField.getText().trim(),
-            String.valueOf(System.nanoTime()),
-            caret
-        );
+        Message split1 = Message.split(codeField.getText().trim(), uidField.getText().trim(), String.valueOf(System.nanoTime()), caret);
         conn.sendMessage(split1);
 
-        // split2
         crdt.splitAtPosition(caret);
-        Message split2 = Message.split(
-            codeField.getText().trim(),
-            uidField.getText().trim(),
-            String.valueOf(System.nanoTime()),
-            caret - 1
-        );
+        Message split2 = Message.split(codeField.getText().trim(), uidField.getText().trim(), String.valueOf(System.nanoTime()), caret - 1);
         conn.sendMessage(split2);
 
-        // delete
         String id = crdt.getCharIdAtPosition(caret);
         if (id != null) {
             crdt.delete(id);
-            Message deleteMsg = Message.delete(
-                codeField.getText().trim(),
-                uidField.getText().trim(),
-                String.valueOf(System.nanoTime()),
-                id
-            );
+            Message deleteMsg = Message.delete(codeField.getText().trim(), uidField.getText().trim(), String.valueOf(System.nanoTime()), id);
             conn.sendMessage(deleteMsg);
         }
 
@@ -283,7 +261,7 @@ public class UIController {
         Message msg = new Message();
         msg.type = type;
         msg.sessionCode = codeField.getText().trim();
-        msg.uid         = uidField.getText().trim();
+        msg.uid = uidField.getText().trim();
         conn.sendMessage(msg);
     }
 
