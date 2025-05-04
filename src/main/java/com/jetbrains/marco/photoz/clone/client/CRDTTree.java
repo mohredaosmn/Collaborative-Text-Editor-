@@ -3,6 +3,7 @@ package com.jetbrains.marco.photoz.clone.client;
 import java.util.*;
 
 public class CRDTTree {
+    private final String rootId;
     private final Map<String, CRDTNode> nodes = new HashMap<>();
     private final Map<String, List<String>> children = new HashMap<>();
     private final Deque<Operation> undoStack = new ArrayDeque<>();
@@ -19,9 +20,18 @@ public class CRDTTree {
     }
 
     public CRDTTree() {
+        // Initialize the root node
         CRDTNode root = new CRDTNode("", "0", "0", null);
+        this.rootId = root.id;
         nodes.put(root.id, root);
         children.put(root.id, new ArrayList<>());
+    }
+
+    /**
+     * Returns the root node's ID.
+     */
+    public String getRootId() {
+        return rootId;
     }
 
     public void insert(String value, String uid, String clock, String parentId) {
@@ -48,7 +58,7 @@ public class CRDTTree {
 
     public void splitAtPosition(int pos) {
         List<String> ordered = new ArrayList<>();
-        flatten("0-0", ordered);
+        flatten(rootId, ordered);
         int idx = 0;
         String splitNodeId = null;
         int splitPosInNode = 0;
@@ -75,22 +85,22 @@ public class CRDTTree {
 
             originalNode.deleted = true;
 
-            String firstPartId = uid + "-" + timestamp + "-1";
+            // Insert first part
             insert(firstPart, uid, String.valueOf(timestamp), originalNode.parentId);
+            // Insert newline as separator
+            insert("\n", uid, String.valueOf(timestamp + 1), uid + "-" + timestamp);
+            // Insert second part
+            insert(secondPart, uid, String.valueOf(timestamp + 2), uid + "-" + (timestamp + 1));
 
-            String newlineId = uid + "-" + (timestamp+1) + "-nl";
-            insert("\n", uid, String.valueOf(timestamp+1), firstPartId);
-
-            String secondPartId = uid + "-" + (timestamp+2) + "-2";
-            insert(secondPart, uid, String.valueOf(timestamp+2), newlineId);
-
+            // Reattach children
             if (children.containsKey(splitNodeId)) {
                 List<String> childIds = new ArrayList<>(children.get(splitNodeId));
                 for (String childId : childIds) {
                     CRDTNode child = nodes.get(childId);
-                    String newChildId = child.uid + "-" + (timestamp+3) + "-ch";
-                    insert(child.value, child.uid, String.valueOf(timestamp+3), secondPartId);
-                    nodes.get(newChildId).deleted = child.deleted;
+                    insert(child.value, child.uid, String.valueOf(timestamp + 3), child.parentId.equals(splitNodeId)
+                            ? uid + "-" + (timestamp + 2)
+                            : child.parentId);
+                    nodes.get(child.uid + "-" + (timestamp + 3)).deleted = child.deleted;
                     child.deleted = true;
                 }
                 children.remove(splitNodeId);
@@ -100,7 +110,7 @@ public class CRDTTree {
 
     public String getDocument() {
         StringBuilder sb = new StringBuilder();
-        buildText("0-0", sb);
+        buildText(rootId, sb);
         return sb.toString();
     }
 
@@ -119,7 +129,7 @@ public class CRDTTree {
     public String getCharIdAtPosition(int pos) {
         if (pos < 0) return null;
         List<String> ordered = new ArrayList<>();
-        flatten("0-0", ordered);
+        flatten(rootId, ordered);
         int idx = 0;
         for (String id : ordered) {
             CRDTNode n = nodes.get(id);
@@ -127,18 +137,18 @@ public class CRDTTree {
                 if (idx == pos) {
                     return id;
                 }
-                idx++;
+                idx += n.value.length();
             }
         }
         return null;
     }
 
     public String getParentIdForInsertAtPosition(int pos) {
-        if (pos <= 0) return "0-0";
+        if (pos <= 0) return rootId;
         List<String> ordered = new ArrayList<>();
-        flatten("0-0", ordered);
+        flatten(rootId, ordered);
         int idx = 0;
-        String lastId = "0-0";
+        String lastId = rootId;
         for (String id : ordered) {
             CRDTNode n = nodes.get(id);
             if (!n.deleted) {
