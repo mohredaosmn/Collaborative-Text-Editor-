@@ -1,33 +1,119 @@
 package com.jetbrains.marco.photoz.clone.client;
 
-import com.jetbrains.marco.photoz.clone.common.JSONUtils;
-import com.jetbrains.marco.photoz.clone.client.Message;
-import javafx.application.Platform;
-import javafx.fxml.FXML;
-import javafx.scene.control.*;
-import javafx.scene.input.KeyCode;
-import javafx.scene.input.KeyEvent;
-import javafx.stage.FileChooser;
-
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
+import java.util.HashMap;
+import java.util.Map;
+
+import com.jetbrains.marco.photoz.clone.common.Message;
+
+import javafx.application.Platform;
+import javafx.fxml.FXML;
+import javafx.scene.control.Label;
+import javafx.scene.control.ListView;
+import javafx.scene.control.TextArea;
+import javafx.scene.control.TextField;
+import javafx.scene.input.KeyCode;
+import javafx.scene.input.KeyEvent;
+import javafx.scene.layout.HBox;
+import javafx.stage.FileChooser;
 
 public class UIController {
     @FXML public TextArea textArea;
     @FXML public TextField codeField, uidField;
-    @FXML public ListView<String> userList;
-
+    @FXML public ListView<HBox> userList;
+    
     private ClientConnection conn;
     private CRDTTree crdt = new CRDTTree();
     private boolean isRemoteUpdate = false;
+    private final Map<String, HBox> userEntries = new HashMap<>();
 
     @FXML
     public void onConnect() {
         String code = codeField.getText().trim();
         String uid = uidField.getText().trim();
-        conn = new ClientConnection("ws://localhost:8080/ws/edit", this::onMessage);
+        conn = new ClientConnection("ws://localhost:8080/ws/edit", this::handleIncomingMessage);
         conn.connect(code, uid);
+        
+        textArea.caretPositionProperty().addListener((obs, oldPos, newPos) -> {
+            if (!isRemoteUpdate && conn != null) {
+                int line = calculateCurrentLine();
+                conn.sendCursorPosition(line);
+            }
+        });
+    }
+
+    private void handleIncomingMessage(Message msg) {
+        Platform.runLater(() -> {
+            if (msg.uid.equals(uidField.getText())) return;
+            
+            switch (msg.type) {
+                case Message.JOIN:
+                    addUserToList(msg.uid);
+                    break;
+                case Message.LEAVE:
+                    removeUserFromList(msg.uid);
+                    break;
+                case Message.CURSOR_POSITION:
+                    updateUserLine(msg.uid, msg.cursorLine);
+                    break;
+                case Message.INSERT:
+                    if (msg.content != null && msg.parentId != null) {
+                        crdt.insert(msg.content, msg.uid, msg.clock, msg.parentId);
+                    }
+                    break;
+                case Message.DELETE:
+                    if (msg.targetId != null) {
+                        crdt.delete(msg.targetId);
+                    }
+                    break;
+                case Message.UNDO:
+                    crdt.undo();
+                    break;
+                case Message.REDO:
+                    crdt.redo();
+                    break;
+                case Message.SPLIT:
+                    if (msg.position >= 0) {
+                        crdt.splitAtPosition(msg.position);
+                    }
+                    break;
+            }
+            redraw(textArea.getCaretPosition());
+        });
+    }
+
+    private void addUserToList(String uid) {
+        if (!userEntries.containsKey(uid)) {
+            Label nameLabel = new Label(uid);
+            Label lineLabel = new Label("(Line 1)");
+            lineLabel.setStyle("-fx-text-fill: #666;");
+            
+            HBox container = new HBox(5, nameLabel, lineLabel);
+            userList.getItems().add(container);
+            userEntries.put(uid, container);
+        }
+    }
+
+    private void updateUserLine(String uid, int line) {
+        HBox container = userEntries.get(uid);
+        if (container != null) {
+            Label lineLabel = (Label) container.getChildren().get(1);
+            lineLabel.setText("(Line " + (line + 1) + ")");
+        }
+    }
+
+    private void removeUserFromList(String uid) {
+        HBox container = userEntries.remove(uid);
+        if (container != null) {
+            userList.getItems().remove(container);
+        }
+    }
+
+    private int calculateCurrentLine() {
+        String text = textArea.getText(0, textArea.getCaretPosition());
+        return text.split("\n", -1).length - 1;
     }
 
     @FXML
@@ -54,198 +140,127 @@ public class UIController {
     @FXML
     public void onUndo() {
         crdt.undo();
-        broadcastControl("undo");
+        broadcastControl(Message.UNDO);
         redraw(textArea.getCaretPosition());
     }
 
     @FXML
     public void onRedo() {
         crdt.redo();
-        broadcastControl("redo");
+        broadcastControl(Message.REDO);
         redraw(textArea.getCaretPosition());
     }
 
-    private void onMessage(String payload) {
-        Message m = JSONUtils.fromJson(payload, Message.class);
-        if (m == null || m.uid.equals(uidField.getText().trim())) return;
-
-        Platform.runLater(() -> {
-            switch (m.type) {
-                case "insert":
-                    if (m.value != null && m.parentId != null) {
-                        crdt.insert(m.value, m.uid, m.clock, m.parentId);
-                    }
-                    break;
-                case "delete":
-                    if (m.targetId != null) {
-                        crdt.delete(m.targetId);
-                    }
-                    break;
-                case "undo":
-                    crdt.undo();
-                    break;
-                case "redo":
-                    crdt.redo();
-                    break;
-                case "join":
-                    if (m.uid != null && !userList.getItems().contains(m.uid)) {
-                        userList.getItems().add(m.uid);
-                    }
-                    break;
-                case "split":
-                    if (m.position >= 0) {
-                        crdt.splitAtPosition(m.position);
-                    }
-                    break;
-            }
-            redraw(textArea.getCaretPosition());
-        });
-    }
-
-   
     @FXML
-
     public void initialize() {
-        // 1) Catch every typed character (including space & Enter) in KEY_TYPED
         textArea.addEventFilter(KeyEvent.KEY_TYPED, e -> {
             if (isRemoteUpdate || conn == null) return;
-
             String ch = e.getCharacter();
             if (ch == null || ch.isEmpty()) return;
             char c = ch.charAt(0);
-
-            // Allow everything except ISO-control (we want space and newline!)
             if (Character.isISOControl(c) && c != '\n') return;
-
-            e.consume();  // take over default insertion
-
-            if (c == '\n') {
-                handleEnter();      // delegate newline
-            } else {
-                handleInsert(ch);   // delegate every other printable char
-            }
+            e.consume();
+            if (c == '\n') handleEnter();
+            else handleInsert(ch);
         });
 
-        // 2) Handle only control keys here
         textArea.setOnKeyPressed(e -> {
             if (conn == null) return;
-
-            // Undo/Redo
             if (e.isControlDown() && e.getCode() == KeyCode.Z) {
                 if (e.isShiftDown()) onRedo();
                 else onUndo();
                 e.consume();
                 return;
             }
-
-            // Backspace
             if (e.getCode() == KeyCode.BACK_SPACE) {
                 handleBackspace(e);
             }
-            // (no SPACE or ENTER here—everything’s in KEY_TYPED)
         });
     }
 
-// --- NEW: handle Enter presses ---
     private void handleEnter() {
-        int caret    = textArea.getCaretPosition();
-        String uid   = uidField.getText().trim();
-        String code  = codeField.getText().trim();
-        String clock = String.valueOf(System.nanoTime());
+        int caret = textArea.getCaretPosition();
         String parentId = crdt.getParentIdForInsertAtPosition(caret);
-
-        // insert newline into CRDT
-        crdt.insert("\n", uid, clock, parentId);
-        // broadcast
-        Message m = new Message("insert", uid, code, clock, "\n", parentId);
-        conn.send(JSONUtils.toJson(m));
-
+        Message msg = Message.insert(
+            codeField.getText().trim(),
+            uidField.getText().trim(),
+            String.valueOf(System.nanoTime()),
+            "\n",
+            parentId
+        );
+        crdt.insert("\n", msg.uid, msg.clock, msg.parentId);
+        conn.sendMessage(msg);
         redraw(caret + 1);
     }
 
-// --- existing delegate for all other chars (letters, digits, spaces, punctuation) ---
     private void handleInsert(String ch) {
-        int caret    = textArea.getCaretPosition();
-        String uid   = uidField.getText().trim();
-        String code  = codeField.getText().trim();
-        String clock = String.valueOf(System.nanoTime());
+        int caret = textArea.getCaretPosition();
         String parentId = crdt.getParentIdForInsertAtPosition(caret);
-
-        crdt.insert(ch, uid, clock, parentId);
-        Message m = new Message("insert", uid, code, clock, ch, parentId);
-        conn.send(JSONUtils.toJson(m));
-
+        Message msg = Message.insert(
+            codeField.getText().trim(),
+            uidField.getText().trim(),
+            String.valueOf(System.nanoTime()),
+            ch,
+            parentId
+        );
+        crdt.insert(ch, msg.uid, msg.clock, msg.parentId);
+        conn.sendMessage(msg);
         redraw(caret + 1);
     }
-     // Updated backspace logic (working version)
-     private void handleBackspace(KeyEvent e) {
+
+    private void handleBackspace(KeyEvent e) {
         int caret = textArea.getCaretPosition();
         if (caret <= 0) {
             e.consume();
             return;
         }
 
-        // Split at the current caret to separate nodes
+        // First split at caret position
         crdt.splitAtPosition(caret);
-        Message splitMsg1 = new Message("split", uidField.getText().trim(), codeField.getText().trim(),
-                                      String.valueOf(System.nanoTime()), caret);
-        conn.send(JSONUtils.toJson(splitMsg1));
+        Message split1 = Message.insert(
+            codeField.getText().trim(),
+            uidField.getText().trim(),
+            String.valueOf(System.nanoTime()),
+            "",
+            String.valueOf(caret)
+        );
+        conn.sendMessage(split1);
 
-        // Split again at the current caret to isolate the character
+        // Second split at previous position
         crdt.splitAtPosition(caret);
-        Message splitMsg2 = new Message("split", uidField.getText().trim(), codeField.getText().trim(),
-                                      String.valueOf(System.nanoTime()), caret - 1);
-        conn.send(JSONUtils.toJson(splitMsg2));
+        Message split2 = Message.insert(
+            codeField.getText().trim(),
+            uidField.getText().trim(),
+            String.valueOf(System.nanoTime()),
+            "",
+            String.valueOf(caret - 1)
+        );
+        conn.sendMessage(split2);
 
-        // Delete the single character node
+        // Delete the character
         String id = crdt.getCharIdAtPosition(caret);
         if (id != null) {
             crdt.delete(id);
-            Message deleteMsg = new Message("delete", uidField.getText().trim(), codeField.getText().trim(),
-                                          String.valueOf(System.nanoTime()), id);
-            conn.send(JSONUtils.toJson(deleteMsg));
+            Message deleteMsg = Message.delete(
+                codeField.getText().trim(),
+                uidField.getText().trim(),
+                String.valueOf(System.nanoTime()),
+                id
+            );
+            conn.sendMessage(deleteMsg);
         }
 
         redraw(Math.max(0, caret));
         e.consume();
     }
 
-    private void handleSpace(KeyEvent e) {
-        int caret = textArea.getCaretPosition();
-        if (caret < 0) {
-            e.consume();
-            return;
-        }
-
-    // 1) Figure out where to attach the space
-    String parentId = crdt.getParentIdForInsertAtPosition(caret);
-    String clock    = String.valueOf(System.nanoTime());
-    String uid      = uidField.getText().trim();
-    String code     = codeField.getText().trim();
-
-    // 2) Insert the space into the CRDT
-    crdt.insert(" ", uid, clock, parentId);
-
-    // 3) Broadcast the insert
-    Message m = new Message();
-    m.type        = "insert";
-    m.uid         = uid;
-    m.sessionCode = code;
-    m.clock       = clock;
-    m.value       = " ";
-    m.parentId    = parentId;
-    conn.send(JSONUtils.toJson(m));
-
-    // 4) Consume and redraw one position over
-    e.consume();
-    redraw(caret + 1);
-}
-
-
     private void broadcastControl(String type) {
         if (conn == null) return;
-        Message m = new Message(type, uidField.getText().trim(), codeField.getText().trim());
-        conn.send(JSONUtils.toJson(m));
+        Message msg = new Message();
+        msg.type = type;
+        msg.sessionCode = codeField.getText().trim();
+        msg.uid = uidField.getText().trim();
+        conn.sendMessage(msg);
     }
 
     public void redraw(int caretPos) {
@@ -256,4 +271,3 @@ public class UIController {
         isRemoteUpdate = false;
     }
 }
-
