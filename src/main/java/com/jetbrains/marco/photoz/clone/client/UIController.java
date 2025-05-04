@@ -102,31 +102,35 @@ public class UIController {
         });
     }
 
+   
     @FXML
+
     public void initialize() {
+        // 1) Catch every typed character (including space & Enter) in KEY_TYPED
         textArea.addEventFilter(KeyEvent.KEY_TYPED, e -> {
             if (isRemoteUpdate || conn == null) return;
+
             String ch = e.getCharacter();
             if (ch == null || ch.isEmpty()) return;
             char c = ch.charAt(0);
-            if (Character.isISOControl(c)) return;
 
-            int caret = textArea.getCaretPosition();
-            String parentId = crdt.getParentIdForInsertAtPosition(caret);
-            String clock = String.valueOf(System.nanoTime());
-            String uid = uidField.getText().trim();
+            // Allow everything except ISO-control (we want space and newline!)
+            if (Character.isISOControl(c) && c != '\n') return;
 
-            crdt.insert(ch, uid, clock, parentId);
-            Message m = new Message("insert", uid, codeField.getText().trim(), clock, ch, parentId);
-            conn.send(JSONUtils.toJson(m));
+            e.consume();  // take over default insertion
 
-            e.consume();
-            redraw(caret + 1);
+            if (c == '\n') {
+                handleEnter();      // delegate newline
+            } else {
+                handleInsert(ch);   // delegate every other printable char
+            }
         });
 
+        // 2) Handle only control keys here
         textArea.setOnKeyPressed(e -> {
             if (conn == null) return;
 
+            // Undo/Redo
             if (e.isControlDown() && e.getCode() == KeyCode.Z) {
                 if (e.isShiftDown()) onRedo();
                 else onUndo();
@@ -134,16 +138,44 @@ public class UIController {
                 return;
             }
 
+            // Backspace
             if (e.getCode() == KeyCode.BACK_SPACE) {
                 handleBackspace(e);
-                return;
             }
-
-            if (e.getCode() == KeyCode.ENTER) {
-                handleEnter(e);
-                return;
-            }
+            // (no SPACE or ENTER here—everything’s in KEY_TYPED)
         });
+    }
+
+// --- NEW: handle Enter presses ---
+    private void handleEnter() {
+        int caret    = textArea.getCaretPosition();
+        String uid   = uidField.getText().trim();
+        String code  = codeField.getText().trim();
+        String clock = String.valueOf(System.nanoTime());
+        String parentId = crdt.getParentIdForInsertAtPosition(caret);
+
+        // insert newline into CRDT
+        crdt.insert("\n", uid, clock, parentId);
+        // broadcast
+        Message m = new Message("insert", uid, code, clock, "\n", parentId);
+        conn.send(JSONUtils.toJson(m));
+
+        redraw(caret + 1);
+    }
+
+// --- existing delegate for all other chars (letters, digits, spaces, punctuation) ---
+    private void handleInsert(String ch) {
+        int caret    = textArea.getCaretPosition();
+        String uid   = uidField.getText().trim();
+        String code  = codeField.getText().trim();
+        String clock = String.valueOf(System.nanoTime());
+        String parentId = crdt.getParentIdForInsertAtPosition(caret);
+
+        crdt.insert(ch, uid, clock, parentId);
+        Message m = new Message("insert", uid, code, clock, ch, parentId);
+        conn.send(JSONUtils.toJson(m));
+
+        redraw(caret + 1);
     }
      // Updated backspace logic (working version)
      private void handleBackspace(KeyEvent e) {
@@ -178,18 +210,37 @@ public class UIController {
         e.consume();
     }
 
-
-    private void handleEnter(KeyEvent e) {
+    private void handleSpace(KeyEvent e) {
         int caret = textArea.getCaretPosition();
-        crdt.splitAtPosition(caret);
-        
-        Message m = new Message("split", uidField.getText().trim(), codeField.getText().trim(),
-                              String.valueOf(System.nanoTime()), caret);
-        conn.send(JSONUtils.toJson(m));
+        if (caret < 0) {
+            e.consume();
+            return;
+        }
 
-        redraw(caret + 1);
-        e.consume();
-    }
+    // 1) Figure out where to attach the space
+    String parentId = crdt.getParentIdForInsertAtPosition(caret);
+    String clock    = String.valueOf(System.nanoTime());
+    String uid      = uidField.getText().trim();
+    String code     = codeField.getText().trim();
+
+    // 2) Insert the space into the CRDT
+    crdt.insert(" ", uid, clock, parentId);
+
+    // 3) Broadcast the insert
+    Message m = new Message();
+    m.type        = "insert";
+    m.uid         = uid;
+    m.sessionCode = code;
+    m.clock       = clock;
+    m.value       = " ";
+    m.parentId    = parentId;
+    conn.send(JSONUtils.toJson(m));
+
+    // 4) Consume and redraw one position over
+    e.consume();
+    redraw(caret + 1);
+}
+
 
     private void broadcastControl(String type) {
         if (conn == null) return;
@@ -205,3 +256,4 @@ public class UIController {
         isRemoteUpdate = false;
     }
 }
+
