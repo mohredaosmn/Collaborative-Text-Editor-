@@ -145,24 +145,39 @@ public class UIController {
             }
         });
     }
-
-    private void handleBackspace(KeyEvent e) {
+     // Updated backspace logic (working version)
+     private void handleBackspace(KeyEvent e) {
         int caret = textArea.getCaretPosition();
         if (caret <= 0) {
             e.consume();
             return;
         }
-        
-        String id = crdt.getCharIdAtPosition(caret - 1);
+
+        // Split at the current caret to separate nodes
+        crdt.splitAtPosition(caret);
+        Message splitMsg1 = new Message("split", uidField.getText().trim(), codeField.getText().trim(),
+                                      String.valueOf(System.nanoTime()), caret);
+        conn.send(JSONUtils.toJson(splitMsg1));
+
+        // Split again at the current caret to isolate the character
+        crdt.splitAtPosition(caret);
+        Message splitMsg2 = new Message("split", uidField.getText().trim(), codeField.getText().trim(),
+                                      String.valueOf(System.nanoTime()), caret - 1);
+        conn.send(JSONUtils.toJson(splitMsg2));
+
+        // Delete the single character node
+        String id = crdt.getCharIdAtPosition(caret);
         if (id != null) {
             crdt.delete(id);
-            Message m = new Message("delete", uidField.getText().trim(), codeField.getText().trim(), 
-                                  String.valueOf(System.nanoTime()), id);
-            conn.send(JSONUtils.toJson(m));
+            Message deleteMsg = new Message("delete", uidField.getText().trim(), codeField.getText().trim(),
+                                          String.valueOf(System.nanoTime()), id);
+            conn.send(JSONUtils.toJson(deleteMsg));
         }
-        redraw(Math.max(0, caret - 1));
+
+        redraw(Math.max(0, caret));
         e.consume();
     }
+
 
     private void handleEnter(KeyEvent e) {
         int caret = textArea.getCaretPosition();
