@@ -6,59 +6,78 @@
 <VBox xmlns="http://javafx.com/javafx/21"
       xmlns:fx="http://javafx.com/fxml/1"
       fx:controller="com.jetbrains.marco.photoz.clone.client.UIController"
-      spacing="10"
-      style="-fx-background-color:#f9fafb;">
+      spacing="15"
+      style="-fx-background-color: #f9fafb; -fx-padding: 20;">
 
   <padding>
     <Insets top="15" right="15" bottom="15" left="15"/>
   </padding>
 
   <!-- Session controls -->
-  <HBox spacing="8"
-        style="-fx-background-color:white;
-               -fx-padding:10;
-               -fx-border-color:#e0e0e0;
-               -fx-border-radius:8;">
-    <Button fx:id="newBtn"  text="New"/>
-    <Button fx:id="joinBtn" text="Join"/>
+  <HBox spacing="10"
+        alignment="CENTER_LEFT"
+        style="-fx-background-color: #ffffff;
+               -fx-padding: 12;
+               -fx-border-color: #e0e0e0;
+               -fx-border-radius: 8;
+               -fx-background-radius: 8;
+               -fx-effect: dropshadow(gaussian, rgba(0,0,0,0.05), 4, 0.2, 0, 2);">
+    <Button fx:id="newBtn"  text="New"
+            style="-fx-background-color: #2563eb; -fx-text-fill: white; -fx-background-radius: 5;"/>
+    <Button fx:id="joinBtn" text="Join"
+            style="-fx-background-color: #10b981; -fx-text-fill: white; -fx-background-radius: 5;"/>
     <Label text="Session Code:"/>
     <TextField fx:id="codeField"
                promptText="Enter or generate code"
-               style="-fx-pref-width:120;"/>
+               style="-fx-pref-width: 140;"/>
     <Label text="UID:"/>
     <TextField fx:id="uidField"
                promptText="User ID"
-               style="-fx-pref-width:80;"/>
+               style="-fx-pref-width: 100;"/>
   </HBox>
 
   <!-- Import/Export & Undo/Redo -->
-  <HBox spacing="8"
-        style="-fx-background-color:white;
-               -fx-padding:10;
-               -fx-border-color:#e0e0e0;
-               -fx-border-radius:8;">
-    <Button text="Import .txt" onAction="#onImport"/>
-    <Button text="Export .txt" onAction="#onExport"/>
-    <Button text="Undo"        onAction="#onUndo"/>
-    <Button text="Redo"        onAction="#onRedo"/>
+  <HBox spacing="10"
+        alignment="CENTER_LEFT"
+        style="-fx-background-color: #ffffff;
+               -fx-padding: 12;
+               -fx-border-color: #e0e0e0;
+               -fx-border-radius: 8;
+               -fx-background-radius: 8;
+               -fx-effect: dropshadow(gaussian, rgba(0,0,0,0.05), 4, 0.2, 0, 2);">
+    <Button text="Import .txt" onAction="#onImport"
+            style="-fx-background-color: #f3f4f6;"/>
+    <Button text="Export .txt" onAction="#onExport"
+            style="-fx-background-color: #f3f4f6;"/>
+    <Button text="Undo"        onAction="#onUndo"
+            style="-fx-background-color: #e5e7eb;"/>
+    <Button text="Redo"        onAction="#onRedo"
+            style="-fx-background-color: #e5e7eb;"/>
   </HBox>
 
   <!-- Editor area -->
-  <StackPane>
+  <StackPane style="-fx-background-color: white;
+                    -fx-border-color: #d1d5db;
+                    -fx-border-radius: 8;
+                    -fx-background-radius: 8;
+                    -fx-padding: 8;
+                    -fx-effect: dropshadow(gaussian, rgba(0,0,0,0.03), 6, 0.1, 0, 1);">
     <TextArea fx:id="textArea"
               prefRowCount="20"
               wrapText="false"
-              style="-fx-background-color:white;
-                     -fx-border-color:#cccccc;
-                     -fx-border-radius:5;"/>
+              style="-fx-background-color: white;
+                     -fx-border-color: transparent;
+                     -fx-font-family: 'Consolas', monospace;
+                     -fx-font-size: 14px;"/>
     <Pane fx:id="overlayPane" mouseTransparent="true"/>
   </StackPane>
 
   <!-- Active users -->
   <Label text="Active Users:"
-         style="-fx-font-size:14px; -fx-font-weight:bold"/>
+         style="-fx-font-size: 15px; -fx-font-weight: bold; -fx-text-fill: #374151;"/>
   <ListView fx:id="userList"
-            style="-fx-background-color:white;
-                   -fx-border-color:#e0e0e0;
-                   -fx-border-radius:5;"/>
+            style="-fx-background-color: #ffffff;
+                   -fx-border-color: #e5e7eb;
+                   -fx-border-radius: 5;
+                   -fx-background-radius: 5;"/>
 </VBox>

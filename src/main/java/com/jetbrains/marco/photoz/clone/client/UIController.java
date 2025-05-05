@@ -18,7 +18,7 @@ import java.util.Map;
 
 public class UIController {
     @FXML private TextArea      textArea;
-    @FXML private TextField     codeField;    // single session code field
+    @FXML private TextField     codeField;
     @FXML private TextField     uidField;
     @FXML private Button        newBtn, joinBtn;
     @FXML private ListView<HBox> userList;
@@ -33,7 +33,6 @@ public class UIController {
     private static final String  CODE_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
     private static final SecureRandom RNG = new SecureRandom();
 
-    /** Random 6-char alphanumeric. */
     private String generateSessionCode() {
         StringBuilder sb = new StringBuilder(6);
         for (int i = 0; i < 6; i++) {
@@ -54,29 +53,31 @@ public class UIController {
             char c = ch.charAt(0);
             if (Character.isISOControl(c) && c != '\n') return;
             e.consume();
-            if (c == '\n') handleEnter(); else handleInsert(ch);
+            handleInsert(ch + "");
         });
 
         textArea.setOnKeyPressed(e -> {
             if (conn == null || isReadOnly) return;
-            if (e.isControlDown() && e.getCode() == KeyCode.Z) {
-                if (e.isShiftDown()) onRedo(); else onUndo();
+            if (e.getCode() == KeyCode.ENTER) {
                 e.consume();
+                handleInsert("\n");
             } else if (e.getCode() == KeyCode.BACK_SPACE) {
                 handleBackspace(e);
+            } else if (e.isControlDown() && e.getCode() == KeyCode.Z) {
+                if (e.isShiftDown()) onRedo(); else onUndo();
+                e.consume();
             }
         });
     }
 
-    /** New session → generate and display both editor & RO codes. */
     @FXML public void onNew() {
         crdt = new CRDTTree();
         userList.getItems().clear();
         redraw(0);
 
         String base     = generateSessionCode();
-        String editor   = base;        // write code
-        String readOnly = base + "-RO"; // read‑only code
+        String editor   = base;
+        String readOnly = base + "-RO";
 
         Alert info = new Alert(Alert.AlertType.INFORMATION);
         info.setTitle("Session Codes");
@@ -89,7 +90,6 @@ public class UIController {
         joinSession(editor);
     }
 
-    /** Join by whatever is in codeField. */
     @FXML public void onConnect() {
         String code = codeField.getText().trim();
         if (code.isEmpty()) return;
@@ -97,11 +97,7 @@ public class UIController {
         joinSession(code);
     }
 
-    /**
-     * Strips "-RO" suffix if needed, then actually connect to the base sessionCode.
-     */
     private void joinSession(String rawCode) {
-        // if read‑only, remove suffix before connecting
         String baseCode = isReadOnly
             ? rawCode.substring(0, rawCode.length() - 3)
             : rawCode;
@@ -183,75 +179,29 @@ public class UIController {
         return t.split("\n", -1).length - 1;
     }
 
-    @FXML public void onImport() throws IOException {
-        File f = new FileChooser().showOpenDialog(null);
-        if (f == null) return;
-        String txt = Files.readString(f.toPath());
-        crdt = new CRDTTree();
-        for (char c : txt.toCharArray()) {
-            if (!Character.isISOControl(c) || c == '\n') {
-                crdt.insert(
-                  String.valueOf(c),
-                  "import",
-                  String.valueOf(System.nanoTime()),
-                  crdt.getRootId()
-                );
-            }
-        }
-        redraw(0);
-    }
-
-    @FXML public void onExport() throws IOException {
-        File f = new FileChooser().showSaveDialog(null);
-        if (f == null) return;
-        Files.writeString(f.toPath(), crdt.getDocument());
-    }
-
-    @FXML public void onUndo() {
-        if (isReadOnly) return;
-        crdt.undo();
-        Message m = new Message();
-        m.type        = Message.UNDO;
-        m.uid         = uidField.getText().trim();
-        m.sessionCode = currentSessionCode;
-        conn.send(JSONUtils.toJson(m));
-        redraw(textArea.getCaretPosition());
-    }
-
-    @FXML public void onRedo() {
-        if (isReadOnly) return;
-        crdt.redo();
-        Message m = new Message();
-        m.type        = Message.REDO;
-        m.uid         = uidField.getText().trim();
-        m.sessionCode = currentSessionCode;
-        conn.send(JSONUtils.toJson(m));
-        redraw(textArea.getCaretPosition());
-    }
-
-    private void handleEnter() {
-        int pos    = textArea.getCaretPosition();
-        String uid = uidField.getText().trim();
-        String clk = String.valueOf(System.nanoTime());
-        String parent = crdt.getParentIdForInsertAtPosition(pos);
-
-        crdt.insert("\n", uid, clk, parent);
-        conn.send(JSONUtils.toJson(
-            Message.insert(currentSessionCode, uid, clk, "\n", parent)
-        ));
-        redraw(pos + 1);
-    }
-
     private void handleInsert(String ch) {
         int pos    = textArea.getCaretPosition();
         String uid = uidField.getText().trim();
         String clk = String.valueOf(System.nanoTime());
         String parent = crdt.getParentIdForInsertAtPosition(pos);
-
+    
+        if ("\n".equals(ch)) {
+            // First split the CRDT at the current position
+            crdt.splitAtPosition(pos);
+            conn.send(JSONUtils.toJson(
+                Message.split(currentSessionCode, uid, clk, pos)
+            ));
+    
+            // Important: get new parent AFTER split, because CRDT changed
+            parent = crdt.getParentIdForInsertAtPosition(pos);
+            clk = String.valueOf(System.nanoTime()); // new clock for the insert
+        }
+    
         crdt.insert(ch, uid, clk, parent);
         conn.send(JSONUtils.toJson(
             Message.insert(currentSessionCode, uid, clk, ch, parent)
         ));
+    
         redraw(pos + 1);
     }
 
@@ -284,6 +234,52 @@ public class UIController {
 
         redraw(Math.max(0, pos));
         e.consume();
+    }
+
+    @FXML public void onUndo() {
+        if (isReadOnly) return;
+        crdt.undo();
+        Message m = new Message();
+        m.type        = Message.UNDO;
+        m.uid         = uidField.getText().trim();
+        m.sessionCode = currentSessionCode;
+        conn.send(JSONUtils.toJson(m));
+        redraw(textArea.getCaretPosition());
+    }
+
+    @FXML public void onRedo() {
+        if (isReadOnly) return;
+        crdt.redo();
+        Message m = new Message();
+        m.type        = Message.REDO;
+        m.uid         = uidField.getText().trim();
+        m.sessionCode = currentSessionCode;
+        conn.send(JSONUtils.toJson(m));
+        redraw(textArea.getCaretPosition());
+    }
+
+    @FXML public void onImport() throws IOException {
+        File f = new FileChooser().showOpenDialog(null);
+        if (f == null) return;
+        String txt = Files.readString(f.toPath());
+        crdt = new CRDTTree();
+        for (char c : txt.toCharArray()) {
+            if (!Character.isISOControl(c) || c == '\n') {
+                crdt.insert(
+                  String.valueOf(c),
+                  "import",
+                  String.valueOf(System.nanoTime()),
+                  crdt.getRootId()
+                );
+            }
+        }
+        redraw(0);
+    }
+
+    @FXML public void onExport() throws IOException {
+        File f = new FileChooser().showSaveDialog(null);
+        if (f == null) return;
+        Files.writeString(f.toPath(), crdt.getDocument());
     }
 
     private void redraw(int caretPos) {
