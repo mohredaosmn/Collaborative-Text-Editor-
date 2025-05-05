@@ -2,7 +2,6 @@ package com.jetbrains.marco.photoz.clone.client;
 
 import com.jetbrains.marco.photoz.clone.common.JSONUtils;
 import com.jetbrains.marco.photoz.clone.common.Message;
-
 import javax.websocket.*;
 import java.net.URI;
 import java.util.function.Consumer;
@@ -11,11 +10,11 @@ import java.util.function.Consumer;
 public class ClientConnection {
     private Session session;
     private final String uri;
-    private final Consumer<Message> onMessage;
+    private final Consumer<String> onMessage;  // raw JSON consumer
     private String sessionCode;
     private String uid;
 
-    public ClientConnection(String uri, Consumer<Message> onMessage) {
+    public ClientConnection(String uri, Consumer<String> onMessage) {
         this.uri = uri;
         this.onMessage = onMessage;
     }
@@ -31,7 +30,6 @@ public class ClientConnection {
         }
     }
 
-    /** Sends a cursor‐position update. */
     public void sendCursorPosition(int line) {
         Message m = Message.cursorUpdate(sessionCode, uid, line);
         send(JSONUtils.toJson(m));
@@ -40,15 +38,13 @@ public class ClientConnection {
     @OnOpen
     public void onOpen(Session session) {
         this.session = session;
-        // send join
         Message join = Message.join(sessionCode, uid);
         send(JSONUtils.toJson(join));
     }
 
     @OnMessage
     public void onMsg(String text) {
-        Message msg = JSONUtils.fromJson(text, Message.class);
-        onMessage.accept(msg);
+        onMessage.accept(text);
     }
 
     @OnClose
@@ -61,10 +57,11 @@ public class ClientConnection {
         send(JSONUtils.toJson(m));
     }
 
-    private void send(String txt) {
+    public void send(String txt) {
         try {
-            if (session != null && session.isOpen())
+            if (session != null && session.isOpen()) {
                 session.getBasicRemote().sendText(txt);
+            }
         } catch (Exception e) {
             e.printStackTrace();
         }

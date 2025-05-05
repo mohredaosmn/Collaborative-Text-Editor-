@@ -3,62 +3,62 @@
 <?import javafx.scene.layout.*?>
 <?import javafx.geometry.*?>
 
-<VBox xmlns="http://javafx.com/javafx"
-      xmlns:fx="http://javafx.com/fxml"
+<VBox xmlns="http://javafx.com/javafx/21"
+      xmlns:fx="http://javafx.com/fxml/1"
       fx:controller="com.jetbrains.marco.photoz.clone.client.UIController"
       spacing="10"
-      style="-fx-background-color: #f9fafb;">
+      style="-fx-background-color:#f9fafb;">
 
-    <padding>
-        <Insets top="15" right="15" bottom="15" left="15"/>
-    </padding>
+  <padding>
+    <Insets top="15" right="15" bottom="15" left="15"/>
+  </padding>
 
-    <!-- Session controls -->
-    <VBox spacing="8"
-          style="-fx-background-color:#ffffff; -fx-padding:10; -fx-background-radius:8; -fx-border-radius:8; -fx-border-color:#e0e0e0;">
-        <HBox spacing="8">
-            <Button text="New" onAction="#onNew"
-                    style="-fx-background-color:#0078D7; -fx-text-fill:white; -fx-font-weight:bold;"/>
-            <Button text="Join" onAction="#onConnect"
-                    style="-fx-background-color:#0078D7; -fx-text-fill:white; -fx-font-weight:bold;"/>
-            <TextField fx:id="codeField" promptText="Session Code"
-                       style="-fx-background-color:#ffffff; -fx-border-radius:5;"/>
-            <Label text="UID:" style="-fx-font-weight:bold; -fx-text-fill:#333333;"/>
-            <TextField fx:id="uidField" promptText="User ID"
-                       style="-fx-background-color:#ffffff;"/>
-        </HBox>
+  <!-- Session controls -->
+  <HBox spacing="8"
+        style="-fx-background-color:white;
+               -fx-padding:10;
+               -fx-border-color:#e0e0e0;
+               -fx-border-radius:8;">
+    <Button fx:id="newBtn"  text="New"/>
+    <Button fx:id="joinBtn" text="Join"/>
+    <Label text="Session Code:"/>
+    <TextField fx:id="codeField"
+               promptText="Enter or generate code"
+               style="-fx-pref-width:120;"/>
+    <Label text="UID:"/>
+    <TextField fx:id="uidField"
+               promptText="User ID"
+               style="-fx-pref-width:80;"/>
+  </HBox>
 
-        <HBox spacing="8">
-            <Label text="Write Code:" style="-fx-font-weight:bold; -fx-text-fill:#2ecc71;"/>
-            <TextField fx:id="writeCodeField" editable="false"
-                       style="-fx-background-color:#eafaf1; -fx-text-fill:#2ecc71; -fx-border-color:#2ecc71; -fx-font-weight:bold;"/>
-            <Label text="Read-Only Code:" style="-fx-font-weight:bold; -fx-text-fill:#999;"/>
-            <TextField fx:id="readCodeField" editable="false"
-                       style="-fx-background-color:#f9f9f9; -fx-text-fill:#999; -fx-border-color:#ccc; -fx-font-weight:bold;"/>
-        </HBox>
-    </VBox>
+  <!-- Import/Export & Undo/Redo -->
+  <HBox spacing="8"
+        style="-fx-background-color:white;
+               -fx-padding:10;
+               -fx-border-color:#e0e0e0;
+               -fx-border-radius:8;">
+    <Button text="Import .txt" onAction="#onImport"/>
+    <Button text="Export .txt" onAction="#onExport"/>
+    <Button text="Undo"        onAction="#onUndo"/>
+    <Button text="Redo"        onAction="#onRedo"/>
+  </HBox>
 
-    <!-- File and Undo/Redo row -->
-    <HBox spacing="8"
-          style="-fx-background-color:#ffffff; -fx-padding:10; -fx-background-radius:8; -fx-border-radius:8; -fx-border-color:#e0e0e0;">
-        <Button text="Import .txt" onAction="#onImport"
-                style="-fx-background-color:#e1e1e1; -fx-text-fill:#333333;"/>
-        <Button text="Export .txt" onAction="#onExport"
-                style="-fx-background-color:#e1e1e1; -fx-text-fill:#333333;"/>
-        <Button text="Undo" onAction="#onUndo"
-                style="-fx-background-color:#e1e1e1; -fx-text-fill:#333333;"/>
-        <Button text="Redo" onAction="#onRedo"
-                style="-fx-background-color:#e1e1e1; -fx-text-fill:#333333;"/>
-    </HBox>
+  <!-- Editor area -->
+  <StackPane>
+    <TextArea fx:id="textArea"
+              prefRowCount="20"
+              wrapText="false"
+              style="-fx-background-color:white;
+                     -fx-border-color:#cccccc;
+                     -fx-border-radius:5;"/>
+    <Pane fx:id="overlayPane" mouseTransparent="true"/>
+  </StackPane>
 
-    <!-- Editor area with overlay for remote cursors -->
-    <StackPane>
-        <TextArea fx:id="textArea" prefRowCount="20" wrapText="false"
-                  style="-fx-background-color:white; -fx-border-color:#cccccc; -fx-border-radius:5;"/>
-        <Pane fx:id="overlayPane" mouseTransparent="true"/>
-    </StackPane>
-
-    <Label text="Active Users:" style="-fx-font-size:14px; -fx-font-weight:bold; -fx-text-fill:#333333;"/>
-    <ListView fx:id="userList"
-              style="-fx-background-color:#ffffff; -fx-border-color:#e0e0e0; -fx-border-radius:8;"/>
+  <!-- Active users -->
+  <Label text="Active Users:"
+         style="-fx-font-size:14px; -fx-font-weight:bold"/>
+  <ListView fx:id="userList"
+            style="-fx-background-color:white;
+                   -fx-border-color:#e0e0e0;
+                   -fx-border-radius:5;"/>
 </VBox>
