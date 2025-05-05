@@ -8,7 +8,6 @@ import javafx.scene.control.*;
 import javafx.scene.input.*;
 import javafx.scene.layout.HBox;
 import javafx.stage.FileChooser;
-import javafx.scene.input.Clipboard;
 
 import java.io.File;
 import java.io.IOException;
@@ -46,7 +45,7 @@ public class UIController {
         newBtn .setOnAction(e -> onNew());
         joinBtn.setOnAction(e -> onConnect());
 
-        // Handle typing (including space/newline)
+        // Typing (letters, space, newline)
         textArea.addEventFilter(KeyEvent.KEY_TYPED, e -> {
             if (isRemoteUpdate || conn == null || isReadOnly) return;
             String ch = e.getCharacter();
@@ -57,7 +56,7 @@ public class UIController {
             handleInsert(ch);
         });
 
-        // Handle special keys: Enter, Backspace, Paste, Undo/Redo
+        // Special keys: Enter, Backspace, Paste, Undo/Redo
         textArea.setOnKeyPressed(e -> {
             if (conn == null || isReadOnly) return;
             if (e.getCode() == KeyCode.ENTER) {
@@ -72,7 +71,8 @@ public class UIController {
                 handlePaste();
             }
             else if (e.isControlDown() && e.getCode() == KeyCode.Z) {
-                if (e.isShiftDown()) onRedo(); else onUndo();
+                if (e.isShiftDown()) onRedo();
+                else                   onUndo();
                 e.consume();
             }
         });
@@ -186,26 +186,58 @@ public class UIController {
     }
 
     /**
-     * Always split first, then insert a single character.
+     * Bulk‐import a file into the CRDT *and* broadcast each character.
      */
+    @FXML public void onImport() throws IOException {
+        File f = new FileChooser().showOpenDialog(null);
+        if (f == null || conn == null) return;
+
+        String txt = Files.readString(f.toPath());
+        crdt = new CRDTTree();
+        redraw(0);
+
+        String uid  = uidField.getText().trim();
+        String code = currentSessionCode;
+        int    caret = 0;
+
+        for (char c : txt.toCharArray()) {
+            if (!Character.isISOControl(c) || c == '\n') {
+                // local insert
+                String parent = crdt.getParentIdForInsertAtPosition(caret);
+                String clk    = String.valueOf(System.nanoTime());
+                crdt.insert(String.valueOf(c), uid, clk, parent);
+
+                // broadcast
+                Message m = Message.insert(code, uid, clk, String.valueOf(c), parent);
+                conn.send(JSONUtils.toJson(m));
+
+                // update UI
+                caret++;
+                redraw(caret);
+            }
+        }
+    }
+
+    @FXML public void onExport() throws IOException {
+        File f = new FileChooser().showSaveDialog(null);
+        if (f == null) return;
+        Files.writeString(f.toPath(), crdt.getDocument());
+    }
+
     private void handleInsert(String ch) {
         int pos    = textArea.getCaretPosition();
         String uid = uidField.getText().trim();
         String ts1 = String.valueOf(System.nanoTime());
 
-        // 1) split at caret
+        // 1) split
         crdt.splitAtPosition(pos);
-        conn.send(JSONUtils.toJson(
-            Message.split(currentSessionCode, uid, ts1, pos)
-        ));
+        conn.send(JSONUtils.toJson(Message.split(currentSessionCode, uid, ts1, pos)));
 
-        // 2) insert the character
+        // 2) insert
         String parent = crdt.getParentIdForInsertAtPosition(pos);
         String ts2    = String.valueOf(System.nanoTime());
         crdt.insert(ch, uid, ts2, parent);
-        conn.send(JSONUtils.toJson(
-            Message.insert(currentSessionCode, uid, ts2, ch, parent)
-        ));
+        conn.send(JSONUtils.toJson(Message.insert(currentSessionCode, uid, ts2, ch, parent)));
 
         // 3) redraw
         redraw(pos + 1);
@@ -216,30 +248,32 @@ public class UIController {
         int pos = textArea.getCaretPosition();
         if (pos <= 0) { e.consume(); return; }
 
-        String uid = uidField.getText().trim();
+        String uid  = uidField.getText().trim();
         String ts1 = String.valueOf(System.nanoTime());
         crdt.splitAtPosition(pos);
-        conn.send(JSONUtils.toJson(
-            Message.split(currentSessionCode, uid, ts1, pos)
-        ));
+        conn.send(JSONUtils.toJson(Message.split(currentSessionCode, uid, ts1, pos)));
 
         String ts2 = String.valueOf(System.nanoTime());
         crdt.splitAtPosition(pos);
-        conn.send(JSONUtils.toJson(
-            Message.split(currentSessionCode, uid, ts2, pos-1)
-        ));
+        conn.send(JSONUtils.toJson(Message.split(currentSessionCode, uid, ts2, pos - 1)));
 
         String id = crdt.getCharIdAtPosition(pos);
         if (id != null) {
             String ts3 = String.valueOf(System.nanoTime());
             crdt.delete(id);
-            conn.send(JSONUtils.toJson(
-                Message.delete(currentSessionCode, uid, ts3, id)
-            ));
+            conn.send(JSONUtils.toJson(Message.delete(currentSessionCode, uid, ts3, id)));
         }
 
         redraw(Math.max(0, pos));
         e.consume();
+    }
+
+    private void handlePaste() {
+        String clip = Clipboard.getSystemClipboard().getString();
+        if (clip == null || clip.isEmpty()) return;
+        for (char c : clip.toCharArray()) {
+            handleInsert(String.valueOf(c));
+        }
     }
 
     @FXML public void onUndo() {
@@ -262,39 +296,6 @@ public class UIController {
         m.sessionCode = currentSessionCode;
         conn.send(JSONUtils.toJson(m));
         redraw(textArea.getCaretPosition());
-    }
-
-    @FXML public void onImport() throws IOException {
-        File f = new FileChooser().showOpenDialog(null);
-        if (f == null) return;
-        String txt = Files.readString(f.toPath());
-        crdt = new CRDTTree();
-        for (char c : txt.toCharArray()) {
-            if (!Character.isISOControl(c) || c == '\n') {
-                crdt.insert(String.valueOf(c), "import",
-                            String.valueOf(System.nanoTime()),
-                            crdt.getRootId());
-            }
-        }
-        redraw(0);
-    }
-
-    @FXML public void onExport() throws IOException {
-        File f = new FileChooser().showSaveDialog(null);
-        if (f == null) return;
-        Files.writeString(f.toPath(), crdt.getDocument());
-    }
-
-    /**
-     * Paste via CRDT: split once, then insert each character
-     * using handleInsert’s split+insert logic.
-     */
-    private void handlePaste() {
-        String clip = Clipboard.getSystemClipboard().getString();
-        if (clip == null || clip.isEmpty()) return;
-        for (char c : clip.toCharArray()) {
-            handleInsert(String.valueOf(c));
-        }
     }
 
     private void redraw(int caretPos) {
