@@ -8,6 +8,7 @@ import javafx.scene.control.*;
 import javafx.scene.input.*;
 import javafx.scene.layout.HBox;
 import javafx.stage.FileChooser;
+import javafx.scene.input.Clipboard;
 
 import java.io.File;
 import java.io.IOException;
@@ -17,21 +18,20 @@ import java.util.HashMap;
 import java.util.Map;
 
 public class UIController {
-    @FXML private TextArea      textArea;
-    @FXML private TextField     codeField;
-    @FXML private TextField     uidField;
-    @FXML private Button        newBtn, joinBtn;
+    @FXML private TextArea       textArea;
+    @FXML private TextField      codeField, uidField;
+    @FXML private Button         newBtn, joinBtn;
     @FXML private ListView<HBox> userList;
 
-    private ClientConnection     conn;
-    private CRDTTree             crdt = new CRDTTree();
-    private boolean              isRemoteUpdate = false;
-    private boolean              isReadOnly     = false;
-    private String               currentSessionCode;
-    private final Map<String,HBox> userEntries = new HashMap<>();
+    private ClientConnection      conn;
+    private CRDTTree              crdt            = new CRDTTree();
+    private boolean               isRemoteUpdate  = false;
+    private boolean               isReadOnly      = false;
+    private String                currentSessionCode;
+    private final Map<String,HBox> userEntries    = new HashMap<>();
 
-    private static final String  CODE_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-    private static final SecureRandom RNG = new SecureRandom();
+    private static final String   CODE_CHARS      = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+    private static final SecureRandom RNG         = new SecureRandom();
 
     private String generateSessionCode() {
         StringBuilder sb = new StringBuilder(6);
@@ -46,6 +46,7 @@ public class UIController {
         newBtn .setOnAction(e -> onNew());
         joinBtn.setOnAction(e -> onConnect());
 
+        // Handle typing (including space/newline)
         textArea.addEventFilter(KeyEvent.KEY_TYPED, e -> {
             if (isRemoteUpdate || conn == null || isReadOnly) return;
             String ch = e.getCharacter();
@@ -53,17 +54,24 @@ public class UIController {
             char c = ch.charAt(0);
             if (Character.isISOControl(c) && c != '\n') return;
             e.consume();
-            handleInsert(ch + "");
+            handleInsert(ch);
         });
 
+        // Handle special keys: Enter, Backspace, Paste, Undo/Redo
         textArea.setOnKeyPressed(e -> {
             if (conn == null || isReadOnly) return;
             if (e.getCode() == KeyCode.ENTER) {
                 e.consume();
                 handleInsert("\n");
-            } else if (e.getCode() == KeyCode.BACK_SPACE) {
+            }
+            else if (e.getCode() == KeyCode.BACK_SPACE) {
                 handleBackspace(e);
-            } else if (e.isControlDown() && e.getCode() == KeyCode.Z) {
+            }
+            else if (e.isControlDown() && e.getCode() == KeyCode.V) {
+                e.consume();
+                handlePaste();
+            }
+            else if (e.isControlDown() && e.getCode() == KeyCode.Z) {
                 if (e.isShiftDown()) onRedo(); else onUndo();
                 e.consume();
             }
@@ -75,47 +83,45 @@ public class UIController {
         userList.getItems().clear();
         redraw(0);
 
-        String base     = generateSessionCode();
-        String editor   = base;
-        String readOnly = base + "-RO";
+        String editorCode   = generateSessionCode();
+        String readOnlyCode = editorCode + "-RO";
 
         Alert info = new Alert(Alert.AlertType.INFORMATION);
         info.setTitle("Session Codes");
         info.setHeaderText("Share these codes:");
-        info.setContentText("Editor:    " + editor + "\nRead‑only: " + readOnly);
+        info.setContentText("Editor:    " + editorCode + "\nRead‑only: " + readOnlyCode);
         info.showAndWait();
 
-        codeField.setText(editor);
+        codeField.setText(editorCode);
         isReadOnly = false;
-        joinSession(editor);
+        joinSession(editorCode);
     }
 
     @FXML public void onConnect() {
-        String code = codeField.getText().trim();
-        if (code.isEmpty()) return;
-        isReadOnly = code.endsWith("-RO");
-        joinSession(code);
+        String raw = codeField.getText().trim();
+        if (raw.isEmpty()) return;
+        isReadOnly = raw.endsWith("-RO");
+        joinSession(raw);
     }
 
     private void joinSession(String rawCode) {
-        String baseCode = isReadOnly
+        String base = isReadOnly
             ? rawCode.substring(0, rawCode.length() - 3)
             : rawCode;
+        currentSessionCode = base;
 
-        this.currentSessionCode = baseCode;
         String uid = uidField.getText().trim();
-
         conn = new ClientConnection("ws://localhost:8080/ws/edit", this::onMessage);
-        conn.connect(baseCode, uid);
+        conn.connect(base, uid);
 
         textArea.setEditable(!isReadOnly);
         addUserToList(uid);
 
-        textArea.caretPositionProperty().addListener((obs,oldP,newP) -> {
+        textArea.caretPositionProperty().addListener((obs, o, n) -> {
             if (!isRemoteUpdate && conn != null) {
                 int ln = calculateLine();
                 updateUserLine(uid, ln);
-                Message m = Message.cursorUpdate(baseCode, uid, ln);
+                Message m = Message.cursorUpdate(base, uid, ln);
                 conn.send(JSONUtils.toJson(m));
             }
         });
@@ -130,18 +136,18 @@ public class UIController {
         String me = uidField.getText().trim();
         if (m.uid.equals(me)) return;
         switch (m.type) {
-            case Message.JOIN:            addUserToList(m.uid);                 break;
-            case Message.LEAVE:           removeUserFromList(m.uid);            break;
+            case Message.JOIN:            addUserToList(m.uid);                break;
+            case Message.LEAVE:           removeUserFromList(m.uid);           break;
             case Message.CURSOR_POSITION: updateUserLine(m.uid, m.cursorLine); break;
             case Message.INSERT:
-                if (m.content!=null&&m.parentId!=null)
+                if (m.content!=null && m.parentId!=null)
                     crdt.insert(m.content, m.uid, m.clock, m.parentId);
                 break;
             case Message.DELETE:
                 if (m.targetId!=null) crdt.delete(m.targetId);
                 break;
-            case Message.UNDO:            crdt.undo();                          break;
-            case Message.REDO:            crdt.redo();                          break;
+            case Message.UNDO:            crdt.undo();                         break;
+            case Message.REDO:            crdt.redo();                         break;
             case Message.SPLIT:
                 if (m.position>=0) crdt.splitAtPosition(m.position);
                 break;
@@ -165,7 +171,7 @@ public class UIController {
     private void updateUserLine(String uid, int ln) {
         HBox row = userEntries.get(uid);
         if (row != null) {
-            ((Label)row.getChildren().get(1)).setText("(Line " + (ln + 1) + ")");
+            ((Label)row.getChildren().get(1)).setText("(Line " + (ln+1) + ")");
         }
     }
 
@@ -179,29 +185,29 @@ public class UIController {
         return t.split("\n", -1).length - 1;
     }
 
+    /**
+     * Always split first, then insert a single character.
+     */
     private void handleInsert(String ch) {
         int pos    = textArea.getCaretPosition();
         String uid = uidField.getText().trim();
-        String clk = String.valueOf(System.nanoTime());
-        String parent = crdt.getParentIdForInsertAtPosition(pos);
-    
-        if ("\n".equals(ch)) {
-            // First split the CRDT at the current position
-            crdt.splitAtPosition(pos);
-            conn.send(JSONUtils.toJson(
-                Message.split(currentSessionCode, uid, clk, pos)
-            ));
-    
-            // Important: get new parent AFTER split, because CRDT changed
-            parent = crdt.getParentIdForInsertAtPosition(pos);
-            clk = String.valueOf(System.nanoTime()); // new clock for the insert
-        }
-    
-        crdt.insert(ch, uid, clk, parent);
+        String ts1 = String.valueOf(System.nanoTime());
+
+        // 1) split at caret
+        crdt.splitAtPosition(pos);
         conn.send(JSONUtils.toJson(
-            Message.insert(currentSessionCode, uid, clk, ch, parent)
+            Message.split(currentSessionCode, uid, ts1, pos)
         ));
-    
+
+        // 2) insert the character
+        String parent = crdt.getParentIdForInsertAtPosition(pos);
+        String ts2    = String.valueOf(System.nanoTime());
+        crdt.insert(ch, uid, ts2, parent);
+        conn.send(JSONUtils.toJson(
+            Message.insert(currentSessionCode, uid, ts2, ch, parent)
+        ));
+
+        // 3) redraw
         redraw(pos + 1);
     }
 
@@ -210,25 +216,25 @@ public class UIController {
         int pos = textArea.getCaretPosition();
         if (pos <= 0) { e.consume(); return; }
 
-        String uid  = uidField.getText().trim();
-        String clk1 = String.valueOf(System.nanoTime());
+        String uid = uidField.getText().trim();
+        String ts1 = String.valueOf(System.nanoTime());
         crdt.splitAtPosition(pos);
         conn.send(JSONUtils.toJson(
-            Message.split(currentSessionCode, uid, clk1, pos)
+            Message.split(currentSessionCode, uid, ts1, pos)
         ));
 
-        String clk2 = String.valueOf(System.nanoTime());
+        String ts2 = String.valueOf(System.nanoTime());
         crdt.splitAtPosition(pos);
         conn.send(JSONUtils.toJson(
-            Message.split(currentSessionCode, uid, clk2, pos - 1)
+            Message.split(currentSessionCode, uid, ts2, pos-1)
         ));
 
         String id = crdt.getCharIdAtPosition(pos);
         if (id != null) {
-            String clk3 = String.valueOf(System.nanoTime());
+            String ts3 = String.valueOf(System.nanoTime());
             crdt.delete(id);
             conn.send(JSONUtils.toJson(
-                Message.delete(currentSessionCode, uid, clk3, id)
+                Message.delete(currentSessionCode, uid, ts3, id)
             ));
         }
 
@@ -265,12 +271,9 @@ public class UIController {
         crdt = new CRDTTree();
         for (char c : txt.toCharArray()) {
             if (!Character.isISOControl(c) || c == '\n') {
-                crdt.insert(
-                  String.valueOf(c),
-                  "import",
-                  String.valueOf(System.nanoTime()),
-                  crdt.getRootId()
-                );
+                crdt.insert(String.valueOf(c), "import",
+                            String.valueOf(System.nanoTime()),
+                            crdt.getRootId());
             }
         }
         redraw(0);
@@ -280,6 +283,18 @@ public class UIController {
         File f = new FileChooser().showSaveDialog(null);
         if (f == null) return;
         Files.writeString(f.toPath(), crdt.getDocument());
+    }
+
+    /**
+     * Paste via CRDT: split once, then insert each character
+     * using handleInsert’s split+insert logic.
+     */
+    private void handlePaste() {
+        String clip = Clipboard.getSystemClipboard().getString();
+        if (clip == null || clip.isEmpty()) return;
+        for (char c : clip.toCharArray()) {
+            handleInsert(String.valueOf(c));
+        }
     }
 
     private void redraw(int caretPos) {
