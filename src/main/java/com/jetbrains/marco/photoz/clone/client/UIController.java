@@ -111,7 +111,7 @@ public class UIController {
         currentSessionCode = base;
 
         String uid = uidField.getText().trim();
-        conn = new ClientConnection("ws://localhost:8080/ws/edit", this::onMessage);
+        conn = new ClientConnection("ws://192.168.1.11:8080/ws/edit", this::onMessage);
         conn.connect(base, uid);
 
         textArea.setEditable(!isReadOnly);
