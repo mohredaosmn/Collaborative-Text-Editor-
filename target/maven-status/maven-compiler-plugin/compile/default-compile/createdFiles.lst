@@ -1,0 +1,17 @@
+com/jetbrains/marco/photoz/clone/common/Message.class
+com/jetbrains/marco/photoz/clone/server/WebSocketConfig.class
+com/jetbrains/marco/photoz/clone/common/JSONUtils.class
+com/jetbrains/marco/photoz/clone/server/ServerApplication.class
+com/jetbrains/marco/photoz/clone/client/ClientConnection.class
+com/jetbrains/marco/photoz/clone/server/EditWebSocketHandler.class
+com/jetbrains/marco/photoz/clone/client/CRDTTree.class
+com/jetbrains/marco/photoz/clone/client/CRDTNode.class
+com/jetbrains/marco/photoz/clone/client/Main.class
+com/jetbrains/marco/photoz/clone/server/SessionManager.class
+com/jetbrains/marco/photoz/clone/server/SessionManager$SessionData.class
+com/jetbrains/marco/photoz/clone/client/CRDTTree$Operation.class
+com/jetbrains/marco/photoz/clone/client/UIController.class
+com/jetbrains/marco/photoz/clone/client/SessionFileStore$1.class
+com/jetbrains/marco/photoz/clone/client/SessionInfo.class
+com/jetbrains/marco/photoz/clone/client/Operation.class
+com/jetbrains/marco/photoz/clone/client/SessionFileStore.class
