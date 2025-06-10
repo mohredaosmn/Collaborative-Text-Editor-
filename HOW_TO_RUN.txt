@@ -1,0 +1,4 @@
+Steps:
+1)Adjust your network (local host or IP Address) in the UI controller
+2)mvn springboot::run to run a server
+3)mvn javafx::run to run a client
